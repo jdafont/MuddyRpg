@@ -7,15 +7,15 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug executable 'MuddyRpg'",
+            "name": "Debug executable 'muddy_rpg'",
             "cargo": {
                 "args": [
                     "build",
-                    "--bin=MuddyRpg",
-                    "--package=MuddyRpg"
+                    "--bin=muddy_rpg",
+                    "--package=muddy_rpg"
                 ],
                 "filter": {
-                    "name": "MuddyRpg",
+                    "name": "muddy_rpg",
                     "kind": "bin"
                 }
             },
@@ -25,16 +25,16 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests in executable 'MuddyRpg'",
+            "name": "Debug unit tests in executable 'muddy_rpg'",
             "cargo": {
                 "args": [
                     "test",
                     "--no-run",
-                    "--bin=MuddyRpg",
-                    "--package=MuddyRpg"
+                    "--bin=muddy_rpg",
+                    "--package=muddy_rpg"
                 ],
                 "filter": {
-                    "name": "MuddyRpg",
+                    "name": "muddy_rpg",
                     "kind": "bin"
                 }
             },
