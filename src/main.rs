@@ -1,51 +1,19 @@
 use std::collections::HashMap;
-use std::iter::Map;
 
 use bytes::*;
 use tokio::net::tcp::{OwnedWriteHalf, OwnedReadHalf};
-use tokio::net::{TcpListener, TcpStream};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener};
+use tokio::io::{AsyncReadExt};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::*;
 
 mod serialize;
+mod packets;
 
-fn pop(barry: &[u8]) -> [u8; 4] {
-    barry.try_into().expect("slice with incorrect length")
-}
+use crate::packets::*;
+
 type Error = Box<dyn std::error::Error>;
 type Result<T> = core::result::Result<T, Error>;
-
-#[derive(Debug)]
-struct InitRequestData {
-    username: String
-}
-
-#[derive(Debug)]
-struct InitResponseData {
-    object_id: u32
-}
-
-#[derive(Debug)]
-enum Packet {
-    InitRequest(InitRequestData),
-    InitResponse(InitResponseData)
-}
-
-impl Packet {
-    async fn send_packet(self, tx: &mut OwnedWriteHalf) -> std::result::Result<(), std::io::Error>{
-        let mut buf = BytesMut::new();
-        match self {
-            Packet::InitResponse(data) => {
-                buf.put_u32_le(1);
-                buf.put_u32_le(data.object_id);
-            },
-            _ => {}
-        }
-
-        return tx.write_all_buf(&mut buf).await;
-    }
-}
 
 #[derive(Debug)]
 struct PacketFrame {
@@ -66,20 +34,15 @@ async fn handle_client(mut socket: OwnedReadHalf, id: u32, tx: Sender<PacketFram
         let mut buf = BytesMut::with_capacity(1024);
 
         let read_result = socket.read_buf(&mut buf).await;
-        let mut buf = buf.freeze();
+        let buf = buf.freeze();
 
         let packet = match read_result {
             // socket closed
             Ok(n) if n == 0 => {
                 return Ok(());
             },
-            Ok(n) => {
-
-                let username = serialize::read_string(&mut buf);
-
-                Packet::InitRequest(InitRequestData {
-                    username
-                })
+            Ok(_n) => {
+                Packet::read_packet(buf)
             },
             Err(e) => {
                 eprintln!("failed to read from socket; err = {:?}", e);
@@ -87,29 +50,41 @@ async fn handle_client(mut socket: OwnedReadHalf, id: u32, tx: Sender<PacketFram
             }
         };
 
-        let pf = PacketFrame {
-            packet,
-            connection_id: id
-        };
+        match packet {
+            Some(p) => {
 
-        tx.send(pf).await?;
+                let pf = PacketFrame {
+                    packet: p,
+                    connection_id: id
+                };
+
+                tx.send(pf).await?;
+            },
+            None => {
+                eprintln!("Failed to parse a packet");
+            }
+        }
+
     }
 }
 
 struct Player {
     username: String,
+    connection_id: u32,
     object_id: u32
 }
 
 struct GameState {
-    connections: HashMap<u32, Connection>
+    connections: HashMap<u32, Connection>,
+    players: Vec<Player>
 }
 
 async fn run_server(mut connection_rx: Receiver<Connection>) {
     let mut object_id = 0;
 
     let mut state = GameState {
-        connections: HashMap::new()
+        connections: HashMap::new(),
+        players: vec![]
     };
 
     loop {
@@ -146,7 +121,7 @@ async fn run_server(mut connection_rx: Receiver<Connection>) {
                     Err(error::TryRecvError::Empty) => {
                         break
                     },
-                    Err(x) => {
+                    Err(_x) => {
                         drop_conns.push(conn.id);
                         eprintln!("Connection dropped from {}", id);
                         break
@@ -160,12 +135,12 @@ async fn run_server(mut connection_rx: Receiver<Connection>) {
 
         for packet_frame in packets {
             match packet_frame.packet {
-                Packet::InitRequest(data) => {
+                Packet::InitUserRequest(data) => {
                     let name = data.username;
                     object_id += 1;
                     let id = object_id;
 
-                    let response = Packet::InitResponse(InitResponseData {
+                    let response = Packet::InitUserResponse(InitUserResponseData {
                         object_id: id
                     });
 
@@ -174,6 +149,15 @@ async fn run_server(mut connection_rx: Receiver<Connection>) {
                     let resp = response.send_packet(&mut conn.tx).await;
                     resp.expect("Failed to write packet");
                     println!("Wrote a packet to {}", &conn.id);
+
+                    state.players.push(Player {
+                        connection_id: conn.id,
+                        object_id: id,
+                        username: name
+                    });
+                },
+                Packet::MoveRequest(data) => {
+
                 },
                 _ => {
                     eprintln!("Unexpected packet recv'd");
